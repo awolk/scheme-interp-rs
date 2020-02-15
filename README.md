@@ -1,0 +1,1 @@
+Goal: a scheme-ish interpreter in Rust

@@ -1,14 +1,19 @@
+mod stdlib;
+
 use crate::parse::AST;
 use std::collections::HashMap;
 
 #[derive(Clone)]
+pub struct Function {
+    args: Vec<String>,
+    env: Environment,
+    body: AST,
+}
+
+#[derive(Clone)]
 pub enum Value {
     Integer(i64),
-    Function {
-        args: Vec<String>,
-        env: Environment,
-        body: AST,
-    },
+    Function(Function),
     NativeFunction(fn(&[Value]) -> Result<Value, Error>),
 }
 
@@ -46,7 +51,7 @@ impl Environment {
 }
 
 pub struct Error {
-    error_message: String,
+    pub error_message: String,
 }
 
 impl ToString for Error {
@@ -61,7 +66,7 @@ const INVALID_FUNCTION_ERROR: &str = "attempt to call a non-function value";
 
 type Continuation = Box<dyn FnOnce(Result<Value, Error>)>;
 
-fn eval_node(node: AST, env: &Environment, cont: Box<dyn FnOnce(Result<Value, Error>)>) {
+fn eval_node(node: AST, env: &Environment, cont: Continuation) {
     match node {
         AST::Integer(i) => cont(Ok(Value::Integer(i))),
 
@@ -84,12 +89,12 @@ fn eval_node(node: AST, env: &Environment, cont: Box<dyn FnOnce(Result<Value, Er
                 mut vals: Vec<Value>,
                 mut nodes: std::vec::IntoIter<AST>,
                 env: &Environment,
-                cont: Box<dyn FnOnce(Result<Value, Error>)>,
+                cont: Continuation,
             ) {
                 match nodes.next() {
                     None => {
                         match &vals[0] {
-                            Value::Function { args, env, body } => unimplemented!(),
+                            Value::Function(Function { args, env, body }) => unimplemented!(),
                             Value::NativeFunction(f) => match f(&vals[1..]) {
                                 Ok(val) => cont(Ok(val)),
                                 Err(err) => cont(Err(err)),
@@ -134,26 +139,7 @@ mod test {
             AST::Integer(2),
         ]);
 
-        let mut env = Environment::new();
-
-        fn plus(args: &[Value]) -> Result<Value, Error> {
-            let mut sum = 0;
-
-            for arg in args {
-                match arg {
-                    Value::Integer(i) => sum += *i,
-                    _ => {
-                        return Err(Error {
-                            error_message: "all arguments to '+' must be integers".to_string(),
-                        })
-                    }
-                }
-            }
-
-            Ok(Value::Integer(sum))
-        }
-
-        env.set("+".to_string(), Value::NativeFunction(plus));
+        let mut env = stdlib::build();
 
         eval_node(
             node,

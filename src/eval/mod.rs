@@ -13,6 +13,7 @@ pub struct Function {
 #[derive(Clone)]
 pub enum Value {
     Integer(i64),
+    Bool(bool),
     Function(Function),
     NativeFunction(fn(&[Value]) -> Result<Value, Error>),
 }
@@ -69,6 +70,8 @@ type Continuation = Box<dyn FnOnce(Result<Value, Error>)>;
 fn eval_node(node: AST, env: &Environment, cont: Continuation) {
     match node {
         AST::Integer(i) => cont(Ok(Value::Integer(i))),
+
+        AST::Bool(b) => cont(Ok(Value::Bool(b))),
 
         AST::Symbol(s) => match env.get(&s) {
             None => cont(Err(Error {

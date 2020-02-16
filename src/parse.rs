@@ -4,6 +4,7 @@ use crate::lex::{AnnotatedToken, Token};
 pub enum AST {
     List(Vec<AST>),
     Integer(i64),
+    Bool(bool),
     Symbol(String),
 }
 
@@ -22,6 +23,7 @@ fn parse_node(tokens: &[AnnotatedToken]) -> Result<(AST, &[AnnotatedToken]), Err
 
     match &first.token {
         Token::Integer(i) => Ok((AST::Integer(*i), rest)),
+        Token::Bool(b) => Ok((AST::Bool(*b), rest)),
         Token::Symbol(s) => Ok((AST::Symbol(s.clone()), rest)),
         Token::Rparen => Err(Error {
             line: first.line,
@@ -96,7 +98,7 @@ mod test {
     #[test]
     fn generates_correct_ast() {
         use Token::*;
-        // (+ ( 1 2) 3)
+        // (+ ( 1 2 #t) 3)
         let tokens = annotate_tokens(vec![
             Lparen,
             Symbol("+".to_string()),
@@ -104,6 +106,7 @@ mod test {
             Symbol("+".to_string()),
             Integer(1),
             Integer(2),
+            Bool(true),
             Rparen,
             Integer(3),
             Rparen,
@@ -117,6 +120,7 @@ mod test {
                     AST::Symbol("+".to_string()),
                     AST::Integer(1),
                     AST::Integer(2),
+                    AST::Bool(true),
                 ]),
                 AST::Integer(3)
             ])]

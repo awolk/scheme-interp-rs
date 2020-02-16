@@ -7,6 +7,7 @@ pub enum Token {
     Rparen,
     Integer(i64),
     Symbol(String),
+    Bool(bool),
 }
 
 #[derive(PartialEq, Debug)]
@@ -43,6 +44,7 @@ impl ToString for Error {
 }
 
 const INVALID_INTEGER_ERROR: &str = "unable to parse integer value";
+const INVALID_BOOL_ERROR: &str = "invalid boolean format, expected '#t' or '#f'";
 
 struct Lexer<'a> {
     iter: Peekable<Chars<'a>>,
@@ -93,6 +95,8 @@ impl<'a> Lexer<'a> {
         } else if next_chr == ')' {
             self.next_chr();
             Ok(Some(Token::Rparen.annotate(self.line, self.column - 1)))
+        } else if next_chr == '#' {
+            self.get_boolean().map(Some)
         } else if next_chr.is_numeric() {
             self.get_integer().map(Some)
         } else {
@@ -138,6 +142,23 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn get_boolean(&mut self) -> Result<AnnotatedToken, Error> {
+        let line = self.line;
+        let column = self.column;
+        // sanity check
+        assert_eq!(self.next_chr().unwrap(), '#');
+
+        match self.next_chr() {
+            Some('t') => Ok(Token::Bool(true).annotate(line, column)),
+            Some('f') => Ok(Token::Bool(true).annotate(line, column)),
+            _ => Err(Error {
+                line: self.line,
+                column: self.column - 1,
+                message: INVALID_BOOL_ERROR,
+            }),
+        }
+    }
+
     fn get_symbol(&mut self) -> AnnotatedToken {
         let line = self.line;
         let column = self.column;
@@ -173,7 +194,7 @@ mod test {
     fn generates_correct_symbols() {
         use Token::*;
 
-        let source = "(+ 1 21)";
+        let source = "(+ 1 21 #t)";
         let annotated_tokens = tokenize(source).unwrap();
         let tokens = annotated_tokens
             .into_iter()
@@ -186,6 +207,7 @@ mod test {
                 Symbol("+".to_string()),
                 Integer(1),
                 Integer(21),
+                Bool(true),
                 Rparen
             ]
         );

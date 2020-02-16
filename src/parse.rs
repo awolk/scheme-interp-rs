@@ -1,6 +1,6 @@
 use crate::lex::Token;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum AST {
     List(Vec<AST>),
     Integer(i64),

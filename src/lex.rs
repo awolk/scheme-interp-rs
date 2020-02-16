@@ -19,7 +19,7 @@ pub struct Error {
 impl ToString for Error {
     fn to_string(&self) -> String {
         format!(
-            "Error at line {}, col {}: {}",
+            "Syntax error at line {}, col {}: {}",
             self.line_number, self.column_number, self.error_message
         )
     }

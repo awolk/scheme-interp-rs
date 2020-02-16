@@ -1,4 +1,5 @@
 mod lex;
+mod parse;
 
 fn main() {
     let source = "(+ 1 2)";
@@ -9,5 +10,12 @@ fn main() {
             return;
         }
     };
-    dbg!(tokens);
+    let nodes = match parse::parse(&tokens) {
+        Ok(nodes) => nodes,
+        Err(err) => {
+            eprintln!("{}", err.to_string());
+            return;
+        }
+    };
+    dbg!(tokens, nodes);
 }

@@ -1,4 +1,4 @@
-use crate::lex::Token;
+use crate::lex::{AnnotatedToken, Token};
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum AST {
@@ -9,20 +9,24 @@ pub enum AST {
 
 #[derive(Debug)]
 pub struct Error {
-    error_message: &'static str,
+    line: u64,
+    column: u64,
+    message: &'static str,
 }
 
 const UNMATCHED_RPAREN_ERROR: &str = "unmatched ')'";
 const MISSING_RPAREN_ERROR: &str = "missing matching ')'";
 
-fn parse_node(tokens: &[Token]) -> Result<(AST, &[Token]), Error> {
+fn parse_node(tokens: &[AnnotatedToken]) -> Result<(AST, &[AnnotatedToken]), Error> {
     let (first, rest) = tokens.split_first().unwrap();
 
-    match first {
+    match &first.token {
         Token::Integer(i) => Ok((AST::Integer(*i), rest)),
         Token::Symbol(s) => Ok((AST::Symbol(s.clone()), rest)),
         Token::Rparen => Err(Error {
-            error_message: UNMATCHED_RPAREN_ERROR,
+            line: first.line,
+            column: first.column,
+            message: UNMATCHED_RPAREN_ERROR,
         }),
         Token::Lparen => {
             let mut remaining_toks = rest;
@@ -31,11 +35,13 @@ fn parse_node(tokens: &[Token]) -> Result<(AST, &[Token]), Error> {
             loop {
                 if remaining_toks.is_empty() {
                     return Err(Error {
-                        error_message: MISSING_RPAREN_ERROR,
+                        line: first.line,
+                        column: first.column,
+                        message: MISSING_RPAREN_ERROR,
                     });
                 }
 
-                if remaining_toks[0] == Token::Rparen {
+                if remaining_toks[0].token == Token::Rparen {
                     remaining_toks = &remaining_toks[1..];
                     break;
                 }
@@ -52,11 +58,14 @@ fn parse_node(tokens: &[Token]) -> Result<(AST, &[Token]), Error> {
 
 impl ToString for Error {
     fn to_string(&self) -> String {
-        format!("Syntax error: {}", self.error_message)
+        format!(
+            "Syntax error at line {}, col {}: {}",
+            self.line, self.column, self.message
+        )
     }
 }
 
-pub fn parse(tokens: &[Token]) -> Result<Vec<AST>, Error> {
+pub fn parse(tokens: &[AnnotatedToken]) -> Result<Vec<AST>, Error> {
     let mut res = Vec::new();
     let mut tokens = tokens;
 
@@ -73,11 +82,22 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<AST>, Error> {
 mod test {
     use super::*;
 
+    fn annotate_tokens(tokens: Vec<Token>) -> Vec<AnnotatedToken> {
+        tokens
+            .into_iter()
+            .map(|token| AnnotatedToken {
+                token,
+                line: 0,
+                column: 0,
+            })
+            .collect()
+    }
+
     #[test]
     fn generates_correct_ast() {
         use Token::*;
         // (+ ( 1 2) 3)
-        let tokens = vec![
+        let tokens = annotate_tokens(vec![
             Lparen,
             Symbol("+".to_string()),
             Lparen,
@@ -87,7 +107,7 @@ mod test {
             Rparen,
             Integer(3),
             Rparen,
-        ];
+        ]);
         let ast = parse(&tokens).unwrap();
         assert_eq!(
             ast,
@@ -105,14 +125,14 @@ mod test {
 
     #[test]
     fn handles_unmatched_lparen() {
-        let tokens = vec![Token::Lparen];
+        let tokens = annotate_tokens(vec![Token::Lparen]);
         let res = parse(&tokens);
         assert!(res.is_err())
     }
 
     #[test]
     fn handles_extra_rparen() {
-        let tokens = vec![Token::Rparen];
+        let tokens = annotate_tokens(vec![Token::Rparen]);
         let res = parse(&tokens);
         assert!(res.is_err())
     }

@@ -9,18 +9,35 @@ pub enum Token {
     Symbol(String),
 }
 
+#[derive(PartialEq, Debug)]
+pub struct AnnotatedToken {
+    pub token: Token,
+    pub line: u64,
+    pub column: u64,
+}
+
+impl Token {
+    fn annotate(self, line: u64, column: u64) -> AnnotatedToken {
+        AnnotatedToken {
+            token: self,
+            line,
+            column,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Error {
-    line_number: u64,
-    column_number: u64,
-    error_message: &'static str,
+    line: u64,
+    column: u64,
+    message: &'static str,
 }
 
 impl ToString for Error {
     fn to_string(&self) -> String {
         format!(
             "Syntax error at line {}, col {}: {}",
-            self.line_number, self.column_number, self.error_message
+            self.line, self.column, self.message
         )
     }
 }
@@ -29,16 +46,16 @@ const INVALID_INTEGER_ERROR: &str = "unable to parse integer value";
 
 struct Lexer<'a> {
     iter: Peekable<Chars<'a>>,
-    line_number: u64,
-    column_number: u64,
+    line: u64,
+    column: u64,
 }
 
 impl<'a> Lexer<'a> {
     fn new(source: &str) -> Lexer {
         Lexer {
             iter: source.chars().peekable(),
-            line_number: 0,
-            column_number: 0,
+            line: 0,
+            column: 0,
         }
     }
 
@@ -47,11 +64,11 @@ impl<'a> Lexer<'a> {
 
         match next {
             Some('\n') => {
-                self.column_number = 0;
-                self.line_number += 1;
+                self.column = 0;
+                self.line += 1;
             }
             Some(_) => {
-                self.column_number += 1;
+                self.column += 1;
             }
             None => {}
         }
@@ -62,7 +79,7 @@ impl<'a> Lexer<'a> {
     // next returns the next token from the source
     // if there are no more tokens it returns Ok(None)
     // it returns Err if there is a syntax error
-    fn next(&mut self) -> Result<Option<Token>, Error> {
+    fn next(&mut self) -> Result<Option<AnnotatedToken>, Error> {
         self.dump_whitespace();
 
         let next_chr = match self.iter.peek() {
@@ -72,10 +89,10 @@ impl<'a> Lexer<'a> {
 
         if next_chr == '(' {
             self.next_chr();
-            Ok(Some(Token::Lparen))
+            Ok(Some(Token::Lparen.annotate(self.line, self.column - 1)))
         } else if next_chr == ')' {
             self.next_chr();
-            Ok(Some(Token::Rparen))
+            Ok(Some(Token::Rparen.annotate(self.line, self.column - 1)))
         } else if next_chr.is_numeric() {
             self.get_integer().map(Some)
         } else {
@@ -100,30 +117,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn get_integer(&mut self) -> Result<Token, Error> {
+    fn get_integer(&mut self) -> Result<AnnotatedToken, Error> {
+        let line = self.line;
+        let column = self.column;
+
         let mut val = 0;
 
         loop {
             if self.at_delimiter() {
-                return Ok(Token::Integer(val));
+                return Ok(Token::Integer(val).annotate(line, column));
             }
 
             let next_digit = self.next_chr().unwrap().to_digit(10).ok_or(Error {
-                line_number: self.line_number,
-                column_number: self.column_number - 1,
-                error_message: INVALID_INTEGER_ERROR,
+                line: self.line,
+                column: self.column - 1,
+                message: INVALID_INTEGER_ERROR,
             })?;
 
             val = val * 10 + (next_digit as i64);
         }
     }
 
-    fn get_symbol(&mut self) -> Token {
+    fn get_symbol(&mut self) -> AnnotatedToken {
+        let line = self.line;
+        let column = self.column;
+
         let mut val = String::new();
 
         loop {
             if self.at_delimiter() {
-                return Token::Symbol(val);
+                return Token::Symbol(val).annotate(line, column);
             }
 
             val.push(self.next_chr().unwrap());
@@ -131,7 +154,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-pub fn tokenize(source: &str) -> Result<Vec<Token>, Error> {
+pub fn tokenize(source: &str) -> Result<Vec<AnnotatedToken>, Error> {
     let mut lexer = Lexer::new(source);
     let mut res = Vec::new();
 
@@ -145,12 +168,17 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use Token::*;
 
     #[test]
     fn generates_correct_symbols() {
+        use Token::*;
+
         let source = "(+ 1 21)";
-        let tokens = tokenize(source).unwrap();
+        let annotated_tokens = tokenize(source).unwrap();
+        let tokens = annotated_tokens
+            .into_iter()
+            .map(|tok| tok.token)
+            .collect::<Vec<_>>();
         assert_eq!(
             tokens,
             vec![
@@ -169,7 +197,7 @@ mod test {
         let res = tokenize(source);
         assert!(res.is_err());
         let err = res.unwrap_err();
-        assert_eq!(err.line_number, 1);
-        assert_eq!(err.column_number, 2);
+        assert_eq!(err.line, 1);
+        assert_eq!(err.column, 2);
     }
 }

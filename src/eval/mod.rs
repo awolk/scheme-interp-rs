@@ -1,12 +1,15 @@
+mod env;
 mod stdlib;
 
+use crate::eval::env::MutEnvironment;
 use crate::parse::AST;
+use env::{Environment, NestedEnvironment};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Function {
     args: Vec<String>,
-    env: Rc<Environment>,
+    env: Rc<dyn Environment>,
     body: AST,
 }
 
@@ -15,6 +18,7 @@ pub enum Value {
     Bool(bool),
     Function(Function),
     NativeFunction(fn(&[Rc<Value>], Continuation)),
+    Unit,
 }
 
 impl Value {
@@ -23,45 +27,26 @@ impl Value {
     }
 }
 
-struct Environment {
-    parent: Option<Rc<Environment>>,
-    bindings: HashMap<String, Rc<Value>>,
-}
-
-impl Environment {
-    fn new_with_bindings(bindings: HashMap<String, Rc<Value>>) -> Rc<Self> {
-        Rc::new(Environment {
-            parent: None,
-            bindings,
-        })
-    }
-
-    fn new_child_with_bindings(
-        parent: &Rc<Self>,
-        bindings: HashMap<String, Rc<Value>>,
-    ) -> Rc<Self> {
-        Rc::new(Environment {
-            parent: Some(Rc::clone(parent)),
-            bindings,
-        })
-    }
-
-    fn get(&self, key: &str) -> Option<Rc<Value>> {
-        self.bindings
-            .get(key)
-            .cloned()
-            .or_else(|| self.parent.as_ref().and_then(|parent| parent.get(key)))
+impl ToString for Value {
+    fn to_string(&self) -> String {
+        match self {
+            Value::Integer(i) => i.to_string(),
+            Value::Bool(b) => (if *b { "#t" } else { "#f" }).to_string(),
+            Value::Function(_f) => "<lisp function>".to_string(),
+            Value::NativeFunction(_f) => "<native function>".to_string(),
+            Value::Unit => "<unit>".to_string(),
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Error {
-    pub error_message: String,
+    pub message: String,
 }
 
 impl ToString for Error {
     fn to_string(&self) -> String {
-        format!("Runtime error: {}", self.error_message)
+        format!("Runtime error: {}", self.message)
     }
 }
 
@@ -71,10 +56,11 @@ const INVALID_FUNCTION_ERROR: &str = "attempt to call a non-function value";
 const WRONG_NUMBER_ARGS_ERROR: &str = "wrong number of arguments";
 const INVALID_IF_ERROR: &str = "invalid structure for if expression";
 const INVALID_LAMBDA_ERROR: &str = "invalid structure for lambda expression";
+const INVALID_DEFINE_ERROR: &str = "invalid structure for define expression";
 
 type Continuation<'a> = Box<dyn FnOnce(Result<Rc<Value>, Error>) + 'a>;
 
-fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
+fn eval_node<'a>(node: &'a AST, env: Rc<dyn Environment>, cont: Continuation<'a>) {
     match node {
         AST::Integer(i) => cont(Ok(Value::Integer(*i).rc())),
 
@@ -82,7 +68,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
 
         AST::Symbol(s) => match env.get(&s) {
             None => cont(Err(Error {
-                error_message: format!("{}: {}", UNBOUND_SYMBOL_ERROR, s),
+                message: format!("{}: {}", UNBOUND_SYMBOL_ERROR, s),
             })),
             Some(val) => cont(Ok(val)),
         },
@@ -90,7 +76,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
         AST::List(nodes) => {
             if nodes.is_empty() {
                 cont(Err(Error {
-                    error_message: EVAL_EMPTY_LIST_ERROR.to_string(),
+                    message: EVAL_EMPTY_LIST_ERROR.to_string(),
                 }));
                 return;
             }
@@ -101,7 +87,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
                     "if" => {
                         if nodes.len() != 4 {
                             cont(Err(Error {
-                                error_message: INVALID_IF_ERROR.to_string(),
+                                message: INVALID_IF_ERROR.to_string(),
                             }));
                             return;
                         }
@@ -128,7 +114,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
                     "lambda" => {
                         if nodes.len() != 3 {
                             cont(Err(Error {
-                                error_message: INVALID_LAMBDA_ERROR.to_string(),
+                                message: INVALID_LAMBDA_ERROR.to_string(),
                             }));
                             return;
                         }
@@ -141,14 +127,14 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
                                     args_names.push(arg.clone());
                                 } else {
                                     cont(Err(Error {
-                                        error_message: INVALID_LAMBDA_ERROR.to_string(),
+                                        message: INVALID_LAMBDA_ERROR.to_string(),
                                     }));
                                     return;
                                 }
                             }
                         } else {
                             cont(Err(Error {
-                                error_message: INVALID_LAMBDA_ERROR.to_string(),
+                                message: INVALID_LAMBDA_ERROR.to_string(),
                             }));
                             return;
                         }
@@ -170,7 +156,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
             fn eval_nodes(
                 mut vals: Vec<Rc<Value>>,
                 mut nodes: std::slice::Iter<AST>,
-                env: Rc<Environment>,
+                env: Rc<dyn Environment>,
                 cont: Continuation,
             ) {
                 match nodes.next() {
@@ -182,7 +168,7 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
                             Value::Function(Function { args, env, body }) => {
                                 if args.len() != vals.len() {
                                     cont(Err(Error {
-                                        error_message: format!(
+                                        message: format!(
                                             "{}: expected {}, received {}",
                                             WRONG_NUMBER_ARGS_ERROR,
                                             args.len(),
@@ -195,13 +181,13 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
                                 let new_bindings =
                                     args.iter().map(String::clone).zip(vals).collect();
                                 let bound_env =
-                                    Environment::new_child_with_bindings(env, new_bindings);
+                                    NestedEnvironment::new_child_with_bindings(env, new_bindings);
 
                                 eval_node(body, bound_env, cont)
                             }
                             Value::NativeFunction(f) => f(vals.as_slice(), cont),
                             _ => cont(Err(Error {
-                                error_message: INVALID_FUNCTION_ERROR.to_string(),
+                                message: INVALID_FUNCTION_ERROR.to_string(),
                             })),
                         };
                     }
@@ -225,9 +211,83 @@ fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
     }
 }
 
+fn eval_toplevel<'a>(node: &'a AST, env: Rc<MutEnvironment>, cont: Continuation<'a>) {
+    // special handler for top-level node
+    // recognizes define syntax
+    if let AST::List(nodes) = node {
+        if let Some(AST::Symbol(first_sym)) = nodes.first() {
+            if first_sym == "define" {
+                if nodes.len() != 3 {
+                    return cont(Err(Error {
+                        message: INVALID_DEFINE_ERROR.to_string(),
+                    }));
+                }
+
+                let name: String;
+                if let AST::Symbol(s) = &nodes[1] {
+                    name = s.clone();
+                } else {
+                    return cont(Err(Error {
+                        message: INVALID_DEFINE_ERROR.to_string(),
+                    }));
+                }
+
+                return eval_node(
+                    &nodes[2],
+                    Rc::<MutEnvironment>::clone(&env),
+                    Box::new(|res| match res {
+                        Err(err) => cont(Err(err)),
+                        Ok(val) => {
+                            MutEnvironment::set(&env, name, val);
+                            cont(Ok(Value::Unit.rc()))
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    eval_node(node, env, cont);
+}
+
+pub fn eval_program(nodes: Vec<AST>, cont: Continuation) {
+    fn eval_program_rec(
+        mut nodes: std::vec::IntoIter<AST>,
+        env: Rc<MutEnvironment>,
+        cont: Continuation,
+    ) {
+        let node: AST;
+        if let Some(next) = nodes.next() {
+            node = next;
+        } else {
+            return cont(Ok(Value::Unit.rc()));
+        }
+
+        eval_toplevel(
+            &node,
+            Rc::<MutEnvironment>::clone(&env),
+            Box::new(|res| match res {
+                Err(err) => cont(Err(err)),
+                Ok(val) => {
+                    if nodes.len() == 0 {
+                        // return last value
+                        cont(Ok(val))
+                    } else {
+                        eval_program_rec(nodes, env, cont)
+                    }
+                }
+            }),
+        );
+    }
+
+    let env = stdlib::build();
+    eval_program_rec(nodes.into_iter(), env, cont);
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::eval::env::NestedEnvironment;
 
     #[test]
     fn runs_simple_example() {
@@ -239,6 +299,8 @@ mod test {
 
         let env = stdlib::build();
 
+        let mut cont_called = Box::new(false);
+
         eval_node(
             &node,
             env,
@@ -249,8 +311,11 @@ mod test {
                 } else {
                     panic!("expected integer result");
                 }
+                *cont_called = true;
             }),
         );
+
+        assert!(*cont_called);
     }
 
     #[test]
@@ -258,14 +323,16 @@ mod test {
         fn gen_fun(args: &[Rc<Value>], cont: Continuation) {
             cont(Ok(Value::Function(Function {
                 args: vec![],
-                env: Environment::new_with_bindings(HashMap::new()),
+                env: NestedEnvironment::new_with_bindings(HashMap::new()),
                 body: AST::Bool(true),
             })
             .rc()));
         }
         let mut bindings = HashMap::new();
         bindings.insert("gen-fun".to_string(), Value::NativeFunction(gen_fun).rc());
-        let env = Environment::new_with_bindings(bindings);
+        let env = NestedEnvironment::new_with_bindings(bindings);
+
+        let mut cont_called = Box::new(false);
 
         // ((gen-fun))
         let node = AST::List(vec![AST::List(vec![AST::Symbol("gen-fun".to_string())])]);
@@ -279,8 +346,11 @@ mod test {
                 } else {
                     panic!("expected boolean result");
                 }
+                *cont_called = true;
             }),
-        )
+        );
+
+        assert!(*cont_called)
     }
 
     #[test]
@@ -298,7 +368,9 @@ mod test {
             AST::Integer(3),
         ]);
 
-        let env = Environment::new_with_bindings(HashMap::new());
+        let env = NestedEnvironment::new_with_bindings(HashMap::new());
+        let mut cont_called = Box::new(false);
+
         eval_node(
             &node,
             env,
@@ -309,8 +381,11 @@ mod test {
                 } else {
                     panic!("expected integer result");
                 }
+                *cont_called = true;
             }),
-        )
+        );
+
+        assert!(*cont_called);
     }
 
     #[test]
@@ -330,6 +405,7 @@ mod test {
         ]);
 
         let env = stdlib::build();
+        let mut cont_called = Box::new(false);
         eval_node(
             &node,
             env,
@@ -340,7 +416,37 @@ mod test {
                 } else {
                     panic!("expected integer result");
                 }
+                *cont_called = true;
             }),
-        )
+        );
+        assert!(*cont_called)
+    }
+
+    #[test]
+    fn runs_program() {
+        // (define x 1) x
+        let program = vec![
+            AST::List(vec![
+                AST::Symbol("define".to_string()),
+                AST::Symbol("x".to_string()),
+                AST::Integer(1),
+            ]),
+            AST::Symbol("x".to_string()),
+        ];
+
+        let mut cont_called = Box::new(false);
+        eval_program(
+            program,
+            Box::new(|res| {
+                let res = res.unwrap();
+                if let Value::Integer(i) = res.as_ref() {
+                    assert_eq!(*i, 1);
+                } else {
+                    panic!("expected integer result");
+                }
+                *cont_called = true;
+            }),
+        );
+        assert!(*cont_called);
     }
 }

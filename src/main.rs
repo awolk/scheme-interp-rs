@@ -18,5 +18,11 @@ fn main() {
             return;
         }
     };
-    dbg!(tokens, nodes);
+    eval::eval_program(
+        nodes,
+        Box::new(|res| match res {
+            Err(err) => eprintln!("{}", err.to_string()),
+            Ok(val) => println!("=> {}", val.to_string()),
+        }),
+    );
 }

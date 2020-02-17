@@ -1,10 +1,10 @@
 use super::*;
 
-fn plus(args: &[Value]) -> Result<Value, Error> {
+fn plus(args: &[Rc<Value>]) -> Result<Rc<Value>, Error> {
     let mut sum = 0;
 
     for arg in args {
-        match arg {
+        match arg.as_ref() {
             Value::Integer(i) => sum += *i,
             _ => {
                 return Err(Error {
@@ -14,13 +14,13 @@ fn plus(args: &[Value]) -> Result<Value, Error> {
         }
     }
 
-    Ok(Value::Integer(sum))
+    Ok(Value::Integer(sum).rc())
 }
 
-pub(super) fn build() -> Environment {
-    let mut env = Environment::new();
+pub(super) fn build() -> Rc<Environment> {
+    let mut bindings = HashMap::new();
 
-    env.set("+".to_string(), Value::NativeFunction(plus));
+    bindings.insert("+".to_string(), Value::NativeFunction(plus).rc());
 
-    env
+    Environment::new_with_bindings(bindings)
 }

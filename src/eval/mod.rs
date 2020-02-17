@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 pub struct Function {
     args: Vec<String>,
-    env: Environment,
+    env: Rc<Environment>,
     body: AST,
 }
 
@@ -14,7 +14,7 @@ pub enum Value {
     Integer(i64),
     Bool(bool),
     Function(Function),
-    NativeFunction(fn(&[Rc<Value>]) -> Result<Rc<Value>, Error>),
+    NativeFunction(fn(&[Rc<Value>], Continuation)),
 }
 
 impl Value {
@@ -68,14 +68,15 @@ impl ToString for Error {
 const UNBOUND_SYMBOL_ERROR: &str = "unbound symbol";
 const EVAL_EMPTY_LIST_ERROR: &str = "cannot evaluate empty list";
 const INVALID_FUNCTION_ERROR: &str = "attempt to call a non-function value";
+const WRONG_NUMBER_ARGS_ERROR: &str = "wrong number of arguments";
 
-type Continuation = Box<dyn FnOnce(Result<Rc<Value>, Error>)>;
+type Continuation<'a> = Box<dyn FnOnce(Result<Rc<Value>, Error>) + 'a>;
 
-fn eval_node(node: AST, env: Rc<Environment>, cont: Continuation) {
+fn eval_node<'a>(node: &'a AST, env: Rc<Environment>, cont: Continuation<'a>) {
     match node {
-        AST::Integer(i) => cont(Ok(Value::Integer(i).rc())),
+        AST::Integer(i) => cont(Ok(Value::Integer(*i).rc())),
 
-        AST::Bool(b) => cont(Ok(Value::Bool(b).rc())),
+        AST::Bool(b) => cont(Ok(Value::Bool(*b).rc())),
 
         AST::Symbol(s) => match env.get(&s) {
             None => cont(Err(Error {
@@ -94,18 +95,37 @@ fn eval_node(node: AST, env: Rc<Environment>, cont: Continuation) {
 
             fn eval_nodes(
                 mut vals: Vec<Rc<Value>>,
-                mut nodes: std::vec::IntoIter<AST>,
+                mut nodes: std::slice::Iter<AST>,
                 env: Rc<Environment>,
                 cont: Continuation,
             ) {
                 match nodes.next() {
                     None => {
-                        match vals[0].as_ref() {
-                            Value::Function(Function { args, env, body }) => unimplemented!(),
-                            Value::NativeFunction(f) => match f(&vals[1..]) {
-                                Ok(val) => cont(Ok(val)),
-                                Err(err) => cont(Err(err)),
-                            },
+                        let mut vals = vals.into_iter();
+                        let func = vals.next().unwrap();
+
+                        match func.as_ref() {
+                            Value::Function(Function { args, env, body }) => {
+                                if args.len() != vals.len() {
+                                    cont(Err(Error {
+                                        error_message: format!(
+                                            "{}: expected {}, received {}",
+                                            WRONG_NUMBER_ARGS_ERROR,
+                                            args.len(),
+                                            vals.len() - 1
+                                        ),
+                                    }));
+                                    return;
+                                }
+
+                                let new_bindings =
+                                    args.iter().map(String::clone).zip(vals).collect();
+                                let bound_env =
+                                    Environment::new_child_with_bindings(env, new_bindings);
+
+                                eval_node(body, bound_env, cont)
+                            }
+                            Value::NativeFunction(f) => f(vals.as_slice(), cont),
                             _ => cont(Err(Error {
                                 error_message: INVALID_FUNCTION_ERROR.to_string(),
                             })),
@@ -114,7 +134,7 @@ fn eval_node(node: AST, env: Rc<Environment>, cont: Continuation) {
                     Some(node) => eval_node(
                         node,
                         Rc::clone(&env),
-                        Box::new(move |arg| match arg {
+                        Box::new(|arg| match arg {
                             Ok(val) => {
                                 vals.push(val);
                                 eval_nodes(vals, nodes, env, cont);
@@ -126,7 +146,7 @@ fn eval_node(node: AST, env: Rc<Environment>, cont: Continuation) {
             }
 
             let vals = Vec::with_capacity(nodes.len());
-            eval_nodes(vals, nodes.into_iter(), env, cont);
+            eval_nodes(vals, nodes.iter(), env, cont);
         }
     }
 }
@@ -146,7 +166,7 @@ mod test {
         let env = stdlib::build();
 
         eval_node(
-            node,
+            &node,
             env,
             Box::new(|res| {
                 let res = res.unwrap();
@@ -157,5 +177,35 @@ mod test {
                 }
             }),
         );
+    }
+
+    #[test]
+    fn executes_function() {
+        fn gen_fun(args: &[Rc<Value>], cont: Continuation) {
+            cont(Ok(Value::Function(Function {
+                args: vec![],
+                env: Environment::new_with_bindings(HashMap::new()),
+                body: AST::Bool(true),
+            })
+            .rc()));
+        }
+        let mut bindings = HashMap::new();
+        bindings.insert("gen-fun".to_string(), Value::NativeFunction(gen_fun).rc());
+        let env = Environment::new_with_bindings(bindings);
+
+        // ((gen-fun))
+        let node = AST::List(vec![AST::List(vec![AST::Symbol("gen-fun".to_string())])]);
+        eval_node(
+            &node,
+            env,
+            Box::new(|res| {
+                let res = res.unwrap();
+                if let Value::Bool(b) = res.as_ref() {
+                    assert_eq!(*b, true);
+                } else {
+                    panic!("expected boolean result");
+                }
+            }),
+        )
     }
 }

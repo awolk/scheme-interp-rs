@@ -1,4 +1,5 @@
 mod env;
+pub mod repl;
 mod stdlib;
 
 use crate::eval::env::MutEnvironment;
@@ -250,7 +251,7 @@ fn eval_toplevel<'a>(node: &'a AST, env: Rc<MutEnvironment>, cont: Continuation<
     eval_node(node, env, cont);
 }
 
-pub fn eval_program(nodes: Vec<AST>, cont: Continuation) {
+pub fn eval_nodes_toplevel(nodes: Vec<AST>, env: Rc<MutEnvironment>, cont: Continuation) {
     fn eval_program_rec(
         mut nodes: std::vec::IntoIter<AST>,
         env: Rc<MutEnvironment>,
@@ -280,7 +281,6 @@ pub fn eval_program(nodes: Vec<AST>, cont: Continuation) {
         );
     }
 
-    let env = stdlib::build();
     eval_program_rec(nodes.into_iter(), env, cont);
 }
 
@@ -319,41 +319,6 @@ mod test {
     }
 
     #[test]
-    fn executes_function() {
-        fn gen_fun(args: &[Rc<Value>], cont: Continuation) {
-            cont(Ok(Value::Function(Function {
-                args: vec![],
-                env: NestedEnvironment::new_with_bindings(HashMap::new()),
-                body: AST::Bool(true),
-            })
-            .rc()));
-        }
-        let mut bindings = HashMap::new();
-        bindings.insert("gen-fun".to_string(), Value::NativeFunction(gen_fun).rc());
-        let env = NestedEnvironment::new_with_bindings(bindings);
-
-        let mut cont_called = Box::new(false);
-
-        // ((gen-fun))
-        let node = AST::List(vec![AST::List(vec![AST::Symbol("gen-fun".to_string())])]);
-        eval_node(
-            &node,
-            env,
-            Box::new(|res| {
-                let res = res.unwrap();
-                if let Value::Bool(b) = res.as_ref() {
-                    assert_eq!(*b, true);
-                } else {
-                    panic!("expected boolean result");
-                }
-                *cont_called = true;
-            }),
-        );
-
-        assert!(*cont_called)
-    }
-
-    #[test]
     fn handles_if() {
         // (if #t (if #f 1 2) 3) -> 2
         let node = AST::List(vec![
@@ -368,7 +333,7 @@ mod test {
             AST::Integer(3),
         ]);
 
-        let env = NestedEnvironment::new_with_bindings(HashMap::new());
+        let env = stdlib::build();
         let mut cont_called = Box::new(false);
 
         eval_node(
@@ -435,8 +400,9 @@ mod test {
         ];
 
         let mut cont_called = Box::new(false);
-        eval_program(
+        eval_nodes_toplevel(
             program,
+            stdlib::build(),
             Box::new(|res| {
                 let res = res.unwrap();
                 if let Value::Integer(i) = res.as_ref() {

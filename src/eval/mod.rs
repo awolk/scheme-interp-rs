@@ -287,7 +287,6 @@ pub fn eval_nodes_toplevel(nodes: Vec<AST>, env: Rc<MutEnvironment>, cont: Conti
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::eval::env::NestedEnvironment;
 
     #[test]
     fn runs_simple_example() {

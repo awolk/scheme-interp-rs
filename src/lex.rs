@@ -150,7 +150,7 @@ impl<'a> Lexer<'a> {
 
         match self.next_chr() {
             Some('t') => Ok(Token::Bool(true).annotate(line, column)),
-            Some('f') => Ok(Token::Bool(true).annotate(line, column)),
+            Some('f') => Ok(Token::Bool(false).annotate(line, column)),
             _ => Err(Error {
                 line: self.line,
                 column: self.column - 1,
@@ -194,7 +194,7 @@ mod test {
     fn generates_correct_symbols() {
         use Token::*;
 
-        let source = "(+ 1 21 #t)";
+        let source = "(+ 1 21 #t #f)";
         let annotated_tokens = tokenize(source).unwrap();
         let tokens = annotated_tokens
             .into_iter()
@@ -208,6 +208,7 @@ mod test {
                 Integer(1),
                 Integer(21),
                 Bool(true),
+                Bool(false),
                 Rparen
             ]
         );

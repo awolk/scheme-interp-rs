@@ -1,4 +1,6 @@
-use super::*;
+use super::{env::*, value::*, Continuation, Error};
+use std::collections::HashMap;
+use std::rc::Rc;
 
 fn plus(args: &[Rc<Value>], cont: Continuation) {
     let mut sum = 0;

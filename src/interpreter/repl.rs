@@ -1,9 +1,10 @@
 use super::env::MutEnvironment;
-use std::io::{BufRead, StdinLock, StdoutLock, Write};
+use std::io::{stdin, stdout, Write};
 use std::rc::Rc;
 
 pub fn repl() {
-    fn repl_rec(env: Rc<MutEnvironment>, mut stdin: StdinLock, mut stdout: StdoutLock) {
+    fn repl_rec(env: Rc<MutEnvironment>) {
+        let mut stdout = stdout();
         if stdout.write_all(b"> ").is_err() {
             return;
         }
@@ -12,7 +13,7 @@ pub fn repl() {
         }
 
         let mut line = String::new();
-        match stdin.read_line(&mut line) {
+        match stdin().read_line(&mut line) {
             Err(_) => return,
             Ok(0) => return,
             _ => {}
@@ -22,7 +23,7 @@ pub fn repl() {
             Ok(tokens) => tokens,
             Err(err) => {
                 eprintln!("{}", err.to_string());
-                return repl_rec(env, stdin, stdout);
+                return repl_rec(env);
             }
         };
 
@@ -30,7 +31,7 @@ pub fn repl() {
             Ok(nodes) => nodes,
             Err(err) => {
                 eprintln!("{}", err.to_string());
-                return repl_rec(env, stdin, stdout);
+                return repl_rec(env);
             }
         };
 
@@ -42,15 +43,11 @@ pub fn repl() {
                     Err(err) => eprintln!("Error: {}", err.to_string()),
                     Ok(val) => println!("{}", val.to_string()),
                 }
-                repl_rec(env, stdin, stdout);
+                repl_rec(env);
             }),
         )
     }
 
     let env = super::stdlib::build();
-    let stdin = std::io::stdin();
-    let stdin = stdin.lock();
-    let stdout = std::io::stdout();
-    let stdout = stdout.lock();
-    repl_rec(env, stdin, stdout);
+    repl_rec(env);
 }

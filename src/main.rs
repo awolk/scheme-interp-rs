@@ -1,7 +1,7 @@
-mod eval;
+mod interpreter;
 mod lex;
 mod parse;
 
 fn main() {
-    eval::repl::repl();
+    interpreter::repl::repl();
 }

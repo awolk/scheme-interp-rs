@@ -1,50 +1,52 @@
-use super::env::Environment;
-use super::Continuation;
+use super::allocator::{Allocator, Environment, Ptr};
+use crate::interpreter::{Interpreter, Step};
 use crate::parse::AST;
-use std::rc::Rc;
 
 pub struct Function {
     pub(super) args: Vec<String>,
-    pub(super) env: Rc<dyn Environment>,
-    pub(super) body: Rc<Value>,
+    pub(super) env: Ptr<Environment>,
+    pub(super) body: Ptr<Value>,
 }
 
-pub enum Value {
+pub struct Continuation {
+    pub(super) next_steps: Vec<Step>,
+    pub(super) results: Vec<Ptr<Value>>,
+    pub(super) saved_results: Vec<Vec<Ptr<Value>>>,
+}
+
+pub(super) enum Value {
     Integer(i64),
     Bool(bool),
     Function(Function),
-    NativeFunction(fn(&[Rc<Value>], Continuation)),
+    NativeFunction(fn(&mut Interpreter, Ptr<Environment>, &[Ptr<Value>])),
     Symbol(String),
     Nil,
-    Cons(Rc<Value>, Rc<Value>),
+    Cons(Ptr<Value>, Ptr<Value>),
+    Continuation(Continuation),
 }
 
 impl Value {
-    pub fn rc(self) -> Rc<Self> {
-        Rc::new(self)
+    pub(super) fn gc(self, alloc: &mut Allocator) -> Ptr<Self> {
+        alloc.new_val(self)
     }
-}
 
-impl From<AST> for Value {
-    fn from(node: AST) -> Self {
+    pub(super) fn from_ast(node: AST, alloc: &mut Allocator) -> Ptr<Self> {
         match node {
-            AST::Symbol(s) => Value::Symbol(s),
-            AST::Integer(i) => Value::Integer(i),
-            AST::Bool(b) => Value::Bool(b),
+            AST::Symbol(s) => Value::Symbol(s).gc(alloc),
+            AST::Integer(i) => Value::Integer(i).gc(alloc),
+            AST::Bool(b) => Value::Bool(b).gc(alloc),
             AST::List(l) => {
-                let mut res = Value::Nil;
+                let mut res = Value::Nil.gc(alloc);
                 let mut iter = l.into_iter();
                 while let Some(entry) = iter.next_back() {
-                    res = Value::Cons(Value::from(entry).rc(), res.rc());
+                    res = Value::Cons(Value::from_ast(entry, alloc), res).gc(alloc);
                 }
                 res
             }
         }
     }
-}
 
-impl ToString for Value {
-    fn to_string(&self) -> String {
+    pub(super) fn to_string(&self, alloc: &Allocator) -> String {
         match self {
             Value::Integer(i) => i.to_string(),
             Value::Bool(b) => (if *b { "#t" } else { "#f" }).to_string(),
@@ -52,7 +54,16 @@ impl ToString for Value {
             Value::NativeFunction(_f) => "<native function>".to_string(),
             Value::Symbol(s) => s.clone(),
             Value::Nil => "()".to_string(),
-            Value::Cons(a, b) => format!("({} . {})", a.to_string(), b.to_string()),
+            Value::Cons(a, b) => format!(
+                "({} . {})",
+                alloc.get_val(*a).to_string(alloc),
+                alloc.get_val(*b).to_string(alloc)
+            ),
+            Value::Continuation(_c) => "<continuation>".to_string(),
         }
     }
+}
+
+pub(super) fn clone_steps(cc: &Vec<Step>) -> Vec<Step> {
+    cc.iter().map(|step| step.clone_box()).collect::<Vec<_>>()
 }

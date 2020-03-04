@@ -1,10 +1,15 @@
-use super::env::MutEnvironment;
-use std::io::{stdin, stdout, Write};
-use std::rc::Rc;
+use crate::interpreter::Interpreter;
+use std::io::{stdin, stdout, BufRead, Write};
 
 pub fn repl() {
-    fn repl_rec(env: Rc<MutEnvironment>) {
-        let mut stdout = stdout();
+    let mut interp = Interpreter::new();
+    let env = super::stdlib::build(&mut interp.alloc);
+    let stdout = stdout();
+    let mut stdout = stdout.lock();
+    let stdin = stdin();
+    let mut stdin = stdin.lock();
+
+    loop {
         if stdout.write_all(b"> ").is_err() {
             return;
         }
@@ -13,7 +18,7 @@ pub fn repl() {
         }
 
         let mut line = String::new();
-        match stdin().read_line(&mut line) {
+        match stdin.read_line(&mut line) {
             Err(_) => return,
             Ok(0) => return,
             _ => {}
@@ -23,7 +28,7 @@ pub fn repl() {
             Ok(tokens) => tokens,
             Err(err) => {
                 eprintln!("{}", err.to_string());
-                return repl_rec(env);
+                continue;
             }
         };
 
@@ -31,23 +36,16 @@ pub fn repl() {
             Ok(nodes) => nodes,
             Err(err) => {
                 eprintln!("{}", err.to_string());
-                return repl_rec(env);
+                continue;
             }
         };
 
-        super::eval_nodes_toplevel(
-            nodes,
-            Rc::<MutEnvironment>::clone(&env),
-            Box::new(move |res| {
-                match res {
-                    Err(err) => eprintln!("Error: {}", err.to_string()),
-                    Ok(val) => println!("{}", val.to_string()),
-                }
-                repl_rec(env);
-            }),
-        )
+        for node in nodes {
+            interp.eval_ast(node, env);
+            match interp.run() {
+                Err(err) => eprintln!("Error: {}", err.to_string()),
+                Ok(val) => println!("{}", interp.alloc.get_val(val).to_string(&interp.alloc)),
+            }
+        }
     }
-
-    let env = super::stdlib::build();
-    repl_rec(env);
 }

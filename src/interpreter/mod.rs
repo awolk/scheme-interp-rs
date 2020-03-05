@@ -58,6 +58,13 @@ impl Interpreter {
         }
     }
 
+    fn clear_run_state(&mut self) {
+        self.next_steps = Vec::new();
+        self.results = Vec::new();
+        self.saved_results = Vec::new();
+        self.error = None;
+    }
+
     // returns None if malformed list
     fn cons_list_to_vector(&self, head: Ptr<Value>, tail: Ptr<Value>) -> Option<Vec<Ptr<Value>>> {
         let mut res = Vec::new();
@@ -311,7 +318,9 @@ impl Interpreter {
         while let Some(step) = self.next_steps.pop() {
             step(self);
             if self.error.is_some() {
-                return Err(std::mem::replace(&mut self.error, None).unwrap());
+                let err = std::mem::replace(&mut self.error, None).unwrap();
+                self.clear_run_state();
+                return Err(err);
             }
         }
 

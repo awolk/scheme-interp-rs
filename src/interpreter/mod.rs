@@ -21,11 +21,11 @@ impl ToString for Error {
 const UNBOUND_SYMBOL_ERROR: &str = "unbound symbol";
 const EVAL_EMPTY_LIST_ERROR: &str = "cannot evaluate empty list";
 const EVAL_BAD_LIST_ERROR: &str = "attempt to evaluate malformed list";
-const INVALID_FUNCTION_ERROR: &str = "attempt to call a non-function value";
 const WRONG_NUMBER_ARGS_ERROR: &str = "wrong number of arguments";
 const INVALID_IF_ERROR: &str = "invalid structure for if expression";
 const INVALID_LAMBDA_ERROR: &str = "invalid structure for lambda expression";
 const INVALID_DEFINE_ERROR: &str = "invalid structure for define expression";
+const INVALID_QUOTE_ERROR: &str = "invalid structure for quote expression";
 
 trait StepTrait: FnOnce(&mut Interpreter) {
     fn clone_box(&self) -> Step;
@@ -93,8 +93,8 @@ impl Interpreter {
                 std::mem::replace(&mut interp.results, interp.saved_results.pop().unwrap())
                     .into_iter();
             let func = vals.next().unwrap();
-
-            match interp.alloc.get_val(func) {
+            let func_val = interp.alloc.get_val(func);
+            match func_val {
                 Value::Function(Function { args, env, body }) => {
                     if args.len() != vals.len() {
                         interp.error = Some(Error {
@@ -134,7 +134,10 @@ impl Interpreter {
                 }
                 _ => {
                     interp.error = Some(Error {
-                        message: INVALID_FUNCTION_ERROR.to_string(),
+                        message: format!(
+                            "attempt to call a non-function value: {}",
+                            func_val.to_string(&interp.alloc)
+                        ),
                     });
                 }
             };
@@ -263,6 +266,17 @@ impl Interpreter {
 
                             return;
                         }
+                        "quote" => {
+                            if nodes.len() != 2 {
+                                self.error = Some(Error {
+                                    message: INVALID_QUOTE_ERROR.to_string(),
+                                });
+                                return;
+                            }
+
+                            self.results.push(nodes[1]);
+                            return;
+                        }
                         "define" => {
                             if nodes.len() != 3 {
                                 self.error = Some(Error {
@@ -325,7 +339,6 @@ impl Interpreter {
         }
 
         assert_eq!(self.results.len(), 1);
-
         Ok(self.results.pop().unwrap())
     }
 }

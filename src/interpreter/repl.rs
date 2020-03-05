@@ -1,28 +1,17 @@
 use crate::interpreter::Interpreter;
-use std::io::{stdin, stdout, BufRead, Write};
+use rustyline::Editor;
 
 pub fn repl() {
     let mut interp = Interpreter::new();
     let env = super::stdlib::build(&mut interp.alloc);
-    let stdout = stdout();
-    let mut stdout = stdout.lock();
-    let stdin = stdin();
-    let mut stdin = stdin.lock();
+    let mut editor = Editor::<()>::new();
 
     loop {
-        if stdout.write_all(b"> ").is_err() {
-            return;
-        }
-        if stdout.flush().is_err() {
-            return;
-        }
-
-        let mut line = String::new();
-        match stdin.read_line(&mut line) {
+        let line = match editor.readline("> ") {
+            Ok(line) => line,
             Err(_) => return,
-            Ok(0) => return,
-            _ => {}
-        }
+        };
+        editor.add_history_entry(&line);
 
         let tokens = match crate::lex::tokenize(&line) {
             Ok(tokens) => tokens,

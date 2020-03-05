@@ -23,6 +23,92 @@ fn plus(interp: &mut Interpreter, _env: Ptr<Environment>, args: &[Ptr<Value>]) {
         .push(Value::Integer(sum).gc(&mut interp.alloc));
 }
 
+fn times(interp: &mut Interpreter, _env: Ptr<Environment>, args: &[Ptr<Value>]) {
+    let mut prod = 1;
+
+    for arg in args {
+        match interp.alloc.get_val(*arg) {
+            Value::Integer(i) => prod *= *i,
+            _ => {
+                interp.error = Some(Error {
+                    message: "all arguments to '*' must be integers".to_string(),
+                });
+                return;
+            }
+        }
+    }
+
+    interp
+        .results
+        .push(Value::Integer(prod).gc(&mut interp.alloc));
+}
+
+fn ieq(interp: &mut Interpreter, _env: Ptr<Environment>, args: &[Ptr<Value>]) {
+    if args.len() != 2 {
+        interp.error = Some(Error {
+            message: "i= takes 2 arguments".to_string(),
+        });
+        return;
+    }
+
+    let i1 = match interp.alloc.get_val(args[0]) {
+        Value::Integer(i) => i,
+        _ => {
+            interp.error = Some(Error {
+                message: "the first argument to 'i=' must be an integer".to_string(),
+            });
+            return;
+        }
+    };
+
+    let i2 = match interp.alloc.get_val(args[1]) {
+        Value::Integer(i) => i,
+        _ => {
+            interp.error = Some(Error {
+                message: "the second argument to 'i=' must be an integer".to_string(),
+            });
+            return;
+        }
+    };
+
+    interp
+        .results
+        .push(Value::Bool(i1 == i2).gc(&mut interp.alloc));
+}
+
+fn minus(interp: &mut Interpreter, _env: Ptr<Environment>, args: &[Ptr<Value>]) {
+    if args.len() != 2 {
+        interp.error = Some(Error {
+            message: "'-' takes 2 arguments".to_string(),
+        });
+        return;
+    }
+
+    let i1 = match interp.alloc.get_val(args[0]) {
+        Value::Integer(i) => i,
+        _ => {
+            interp.error = Some(Error {
+                message: "the first argument to '-' must be an integer".to_string(),
+            });
+            return;
+        }
+    };
+
+    let i2 = match interp.alloc.get_val(args[1]) {
+        Value::Integer(i) => i,
+        _ => {
+            interp.error = Some(Error {
+                message: "the second argument to '-' must be an integer".to_string(),
+            });
+            return;
+        }
+    };
+
+    interp
+        .results
+        .push(Value::Integer(i1 - i2).gc(&mut interp.alloc));
+}
+
 fn cons(interp: &mut Interpreter, _env: Ptr<Environment>, args: &[Ptr<Value>]) {
     if args.len() != 2 {
         interp.error = Some(Error {
@@ -82,10 +168,18 @@ fn gc_profile(interp: &mut Interpreter, _env: Ptr<Environment>, _args: &[Ptr<Val
     interp.results.push(Value::Nil.gc(&mut interp.alloc));
 }
 
+fn gc_run(interp: &mut Interpreter, env: Ptr<Environment>, _args: &[Ptr<Value>]) {
+    interp.alloc.gc(env);
+    interp.results.push(Value::Nil.gc(&mut interp.alloc));
+}
+
 pub(super) fn build(alloc: &mut Allocator) -> Ptr<Environment> {
     let mut bindings = HashMap::new();
 
     bindings.insert("+".to_string(), Value::NativeFunction(plus).gc(alloc));
+    bindings.insert("*".to_string(), Value::NativeFunction(times).gc(alloc));
+    bindings.insert("i=".to_string(), Value::NativeFunction(ieq).gc(alloc));
+    bindings.insert("-".to_string(), Value::NativeFunction(minus).gc(alloc));
     bindings.insert("cons".to_string(), Value::NativeFunction(cons).gc(alloc));
     bindings.insert(
         "call/cc".to_string(),
@@ -95,6 +189,10 @@ pub(super) fn build(alloc: &mut Allocator) -> Ptr<Environment> {
     bindings.insert(
         "gc-profile".to_string(),
         Value::NativeFunction(gc_profile).gc(alloc),
+    );
+    bindings.insert(
+        "gc-run".to_string(),
+        Value::NativeFunction(gc_run).gc(alloc),
     );
     bindings.insert("nil".to_string(), Value::Nil.gc(alloc));
 

@@ -78,9 +78,6 @@ impl Interpreter {
     }
 
     fn handle_func_call(&mut self, nodes: Vec<Ptr<Value>>, env: Ptr<Environment>) {
-        // run garbage collection
-        self.alloc.gc(env);
-
         self.saved_results
             .push(std::mem::replace(&mut self.results, Vec::new()));
 
@@ -98,7 +95,7 @@ impl Interpreter {
                                 "{}: expected {}, received {}",
                                 WRONG_NUMBER_ARGS_ERROR,
                                 args.len(),
-                                vals.len() - 1
+                                vals.len()
                             ),
                         });
                         return;
@@ -281,6 +278,7 @@ impl Interpreter {
                             };
 
                             self.next_steps.push(Box::new(move |interp| {
+                                assert_eq!(interp.results.len(), 1);
                                 interp.alloc.set_bound_value(
                                     env,
                                     name,

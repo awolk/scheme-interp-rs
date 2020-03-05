@@ -4,13 +4,15 @@ use std::marker::PhantomData;
 
 pub(super) struct Ptr<T> {
     index: usize,
+    generation: usize,
     phantom: PhantomData<T>,
 }
 
 impl<T> Ptr<T> {
-    fn new(index: usize) -> Self {
+    fn new(index: usize, generation: usize) -> Self {
         Self {
             index,
+            generation,
             phantom: PhantomData,
         }
     }
@@ -20,6 +22,7 @@ impl<T> Clone for Ptr<T> {
     fn clone(&self) -> Self {
         Ptr {
             index: self.index,
+            generation: self.generation,
             phantom: PhantomData,
         }
     }
@@ -31,14 +34,16 @@ struct GcNode<T> {
     item: T,
     marked: bool,
     free: bool,
+    generation: usize,
 }
 
 impl<T> GcNode<T> {
-    fn new(item: T) -> Self {
+    fn new(item: T, generation: usize) -> Self {
         Self {
             item,
             marked: false,
             free: false,
+            generation,
         }
     }
 }
@@ -46,6 +51,7 @@ impl<T> GcNode<T> {
 struct ItemAllocator<T> {
     values: Vec<GcNode<T>>,
     free: Vec<usize>,
+    generation: usize,
 }
 
 impl<T> ItemAllocator<T> {
@@ -53,6 +59,7 @@ impl<T> ItemAllocator<T> {
         Self {
             values: Vec::new(),
             free: Vec::new(),
+            generation: 0,
         }
     }
 
@@ -60,34 +67,43 @@ impl<T> ItemAllocator<T> {
         match self.free.pop() {
             None => {
                 let index = self.values.len();
-                self.values.push(GcNode::new(item));
-                Ptr::new(index)
+                self.values.push(GcNode::new(item, self.generation));
+                Ptr::new(index, self.generation)
             }
             Some(index) => {
-                self.values[index] = GcNode::new(item);
-                Ptr::new(index)
+                self.values[index] = GcNode::new(item, self.generation);
+                Ptr::new(index, self.generation)
             }
         }
     }
 
     fn get(&self, ptr: Ptr<T>) -> &T {
-        &self.values[ptr.index].item
+        let gc_node = &self.values[ptr.index];
+        assert_eq!(gc_node.generation, ptr.generation);
+        &gc_node.item
     }
 
     fn get_mut(&mut self, ptr: Ptr<T>) -> &mut T {
-        &mut self.values[ptr.index].item
+        let gc_node = &mut self.values[ptr.index];
+        assert_eq!(gc_node.generation, ptr.generation);
+        &mut gc_node.item
     }
 
     fn sweep(&mut self) {
+        self.generation += 1;
         for (i, node) in self.values.iter_mut().enumerate() {
-            if !node.free && !node.marked {
-                self.free.push(i);
-                node.free = true;
+            if !node.free {
+                if node.marked {
+                    node.marked = false;
+                } else {
+                    self.free.push(i);
+                    node.free = true;
+                }
             }
         }
     }
 
-    // returns previous mark value
+    // returns whether the item was previously marked
     fn mark(&mut self, ptr: Ptr<T>) -> bool {
         std::mem::replace(&mut self.values[ptr.index].marked, true)
     }
@@ -195,7 +211,9 @@ impl Allocator {
             }
             Value::Function(f) => {
                 let env = f.env;
-                self.mark_env(env)
+                let body = f.body;
+                self.mark_env(env);
+                self.mark_val(body);
             }
             Value::Continuation(c) => {
                 let mut all_vals = Vec::new();
